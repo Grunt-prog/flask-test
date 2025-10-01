@@ -6,3 +6,4 @@ itsdangerous
 gunicorn
 pyjwt
 requests
+requests_oauthlib
