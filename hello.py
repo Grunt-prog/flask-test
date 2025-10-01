@@ -1,90 +1,62 @@
-import json
+import os
 import requests
-import jwt
-from flask import Flask, request, jsonify
+from flask import Flask, redirect, request, session, url_for, jsonify
+from requests_oauthlib import OAuth2Session
 
 app = Flask(__name__)
+app.secret_key = os.urandom(24)
 
-# Replace with your Entra ID Tenant ID
+# Azure AD configuration (replace these with your actual details)
 TENANT_ID = 'baa91130-3535-4c79-b3f4-2202979a83b8'
-# Replace with your Application (Client) ID
 CLIENT_ID = 'b8f3843f-9aeb-49c6-8838-7a2f8bf2cbed'
-# URL to fetch the JWKS (public keys) for token validation
-JWKS_URL = f"https://login.microsoftonline.com/{TENANT_ID}/discovery/v2.0/keys"
+CLIENT_SECRET = 'DNB8Q~XfZ9dzkzHB11PwcisnFfdZlyNH9qxsEbBL'
+REDIRECT_URI = 'https://ritesh-prac-eygvckezfhbhddea.canadacentral-01.azurewebsites.net/auth/callback'
 
-# Function to fetch the public keys from Microsoft Entra ID
-def get_public_keys():
-    response = requests.get(JWKS_URL)
-    return response.json()["keys"]
+# Azure AD OAuth 2.0 endpoints
+AUTHORIZATION_URL = f'https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/authorize'
+TOKEN_URL = f'https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token'
+SCOPE = ["User.Read"]  # Scope to access basic profile information
 
-# Function to verify the JWT token
-def verify_jwt_token(token):
-    # Fetch the public keys
-    public_keys = get_public_keys()
+# Route for the login page (Initiates authentication)
+@app.route("/")
+def index():
+    # Check if user is logged in by checking the session token
+    if 'oauth_token' not in session:
+        return redirect(url_for('login'))
+    # If authenticated, display "Hello World"
+    return "Hello World"
+
+# Route to handle the OAuth login redirect
+@app.route("/login")
+def login():
+    # Create OAuth2Session to handle the OAuth flow
+    azure = OAuth2Session(CLIENT_ID, redirect_uri=REDIRECT_URI, scope=SCOPE)
+    authorization_url, state = azure.authorization_url(AUTHORIZATION_URL)
+    # Store the state in the session to verify after callback
+    session['oauth_state'] = state
+    return redirect(authorization_url)
+
+# Callback route to handle the redirect from Azure after successful login
+@app.route("/auth/callback")
+def callback():
+    azure = OAuth2Session(CLIENT_ID, redirect_uri=REDIRECT_URI, state=session['oauth_state'])
+    token = azure.fetch_token(TOKEN_URL, client_secret=CLIENT_SECRET, authorization_response=request.url)
     
-    # Decode the token to get the "kid" (key ID) from the header
-    unverified_header = jwt.get_unverified_header(token)
-    if unverified_header is None or "kid" not in unverified_header:
-        raise ValueError("Unable to find the 'kid' in the token header")
+    # Store the token in the session for use in subsequent requests
+    session['oauth_token'] = token
 
-    # Find the correct public key
-    rsa_key = {}
-    for key in public_keys:
-        if key["kid"] == unverified_header["kid"]:
-            rsa_key = {
-                "kty": key["kty"],
-                "kid": key["kid"],
-                "use": key["use"],
-                "n": key["n"],
-                "e": key["e"]
-            }
-            break
+    # Fetch user info from Microsoft Graph API to ensure authentication
+    user_info = get_user_info(azure)
 
-    if not rsa_key:
-        raise ValueError("Unable to find appropriate key")
+    # Now user is authenticated, redirect them back to the main page
+    return redirect(url_for('index'))
 
-    # Verify the JWT token using the found public key
-    try:
-        payload = jwt.decode(
-            token,
-            rsa_key,
-            algorithms=["RS256"],
-            audience=CLIENT_ID
-        )
-        return payload
-    except jwt.ExpiredSignatureError:
-        raise ValueError("Token has expired")
-    except jwt.JWTClaimsError:
-        raise ValueError("Invalid claims, please check the audience and issuer")
-    except Exception as e:
-        raise ValueError("Unable to parse token: " + str(e))
+# Function to fetch user info from Microsoft Graph API
+def get_user_info(azure):
+    user_info_url = "https://graph.microsoft.com/v1.0/me"
+    response = azure.get(user_info_url)
+    return response.json()
 
-# Flask route to handle incoming API requests
-@app.route("/query", methods=["POST"])
-def query():
-    # Get the JWT token from the Authorization header
-    auth_header = request.headers.get("Authorization")
-    if auth_header is None:
-        return jsonify({"message": "Authorization header is missing"}), 400
-
-    token = auth_header.split(" ")[1]  # Bearer <token>
-
-    try:
-        # Validate the token
-        payload = verify_jwt_token(token)
-        
-        # Extract the username (typically in 'preferred_username' or 'upn' claims)
-        username = payload.get("preferred_username") or payload.get("upn")
-        if username != "test-user":
-            return jsonify({"message": "Unauthorized user"}), 403
-
-        # Now that the token is valid and the username matches, process the request
-        username_input = request.json.get("username")
-        if not username_input:
-            return jsonify({"message": "Username is required"}), 400
-
-        # Example response: You can interact with your database or other logic here
-        return jsonify({"message": f"Query executed successfully for user {username_input}."})
-
-    except ValueError as e:
-        return jsonify({"message": str(e)}), 401
+if __name__ == "__main__":
+    # Gunicorn will handle the app execution, so we don't need app.run()
+    pass
