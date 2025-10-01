@@ -1,4 +1,4 @@
-# Shamelessly copied from http://flask.pocoo.org/docs/quickstart/
+# Shamelessly copied from http://flask.pocoo.org/docs/quickstart/hihihihi
 
 from flask import Flask
 app = Flask(__name__)
