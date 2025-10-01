@@ -8,7 +8,7 @@ app = Flask(__name__)
 # Replace with your Entra ID Tenant ID
 TENANT_ID = 'baa91130-3535-4c79-b3f4-2202979a83b8'
 # Replace with your Application (Client) ID
-CLIENT_ID = 'b6eced93-cdd2-44c1-9971-767d360b6611'
+CLIENT_ID = 'b8f3843f-9aeb-49c6-8838-7a2f8bf2cbed'
 # URL to fetch the JWKS (public keys) for token validation
 JWKS_URL = f"https://login.microsoftonline.com/{TENANT_ID}/discovery/v2.0/keys"
 
@@ -73,15 +73,18 @@ def query():
         # Validate the token
         payload = verify_jwt_token(token)
         
-        # Now that the token is valid, you can process the request
-        username = request.json.get("username")
-        if not username:
+        # Extract the username (typically in 'preferred_username' or 'upn' claims)
+        username = payload.get("preferred_username") or payload.get("upn")
+        if username != "test-user":
+            return jsonify({"message": "Unauthorized user"}), 403
+
+        # Now that the token is valid and the username matches, process the request
+        username_input = request.json.get("username")
+        if not username_input:
             return jsonify({"message": "Username is required"}), 400
-        
+
         # Example response: You can interact with your database or other logic here
-        return jsonify({"message": f"Query executed successfully for user {username}."})
+        return jsonify({"message": f"Query executed successfully for user {username_input}."})
 
     except ValueError as e:
         return jsonify({"message": str(e)}), 401
-
-
